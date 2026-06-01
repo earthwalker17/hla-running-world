@@ -1,0 +1,169 @@
+export type RouteDifficulty = 'light' | 'standard' | 'challenge' | 'flagship';
+
+export interface RoutePoint {
+  at: number;
+  x: number;
+  y: number;
+}
+
+export interface RouteGeoPoint {
+  lng: number;
+  lat: number;
+}
+
+export interface RouteMapPoint extends RouteGeoPoint {
+  at: number;
+}
+
+export interface RouteMapConfig {
+  center: RouteGeoPoint;
+  zoom: number;
+  path: RouteMapPoint[];
+}
+
+export interface RouteNode {
+  id: string;
+  name: string;
+  city: string;
+  mapLabel?: string;
+  km: number;
+  coord: RouteGeoPoint;
+  story: string;
+  brandHint: string;
+}
+
+export interface RouteReward {
+  id: string;
+  title: string;
+  unlockKm: number;
+  type: 'badge' | 'coupon' | 'lottery' | 'offline';
+}
+
+export interface SeasonRoute {
+  id: string;
+  title: string;
+  subtitle: string;
+  distanceKm: number;
+  durationDays: number;
+  difficulty: RouteDifficulty;
+  accent: string;
+  summary: string;
+  points: RoutePoint[];
+  map: RouteMapConfig;
+  nodes: RouteNode[];
+  rewards: RouteReward[];
+}
+
+export interface Badge {
+  id: string;
+  title: string;
+  description: string;
+  unlockKm: number;
+}
+
+export interface TeamRank {
+  id: string;
+  name: string;
+  members: number;
+  distanceKm: number;
+  trend: string;
+}
+
+export interface SeasonProfile {
+  name: string;
+  routeLabel: string;
+  memberCount: number;
+  activeTeams: number;
+  shareCount: number;
+}
+
+export interface RunRecord {
+  date: string;
+  distanceKm: number;
+  source: 'manual-demo';
+}
+
+export interface DemoState {
+  selectedRouteId: string;
+  records: RunRecord[];
+  lastCoachText: string;
+  lastUnlockedNodeIds: string[];
+  coachStatus: 'local' | 'remote' | 'pending' | 'error';
+  coachProvider: string;
+  coachModel?: string;
+  coachError?: string;
+  lastRunDistanceKm: number;
+  lastRunBeforeKm: number;
+  lastRunAfterKm: number;
+  shareCardVersion: number;
+}
+
+export interface CoachContext {
+  route: SeasonRoute;
+  todayDistance: number;
+  totalDistance: number;
+  streakDays: number;
+  progressPercent: number;
+  unlockedNodes: RouteNode[];
+  newlyUnlockedNodes: RouteNode[];
+}
+
+export interface CoachApiPayload {
+  routeTitle: string;
+  todayDistance: number;
+  totalDistance: number;
+  streakDays: number;
+  progressPercent: number;
+  currentNode: string;
+  newlyUnlockedNodes: string[];
+  distanceToNextNode: number;
+  fallbackText: string;
+}
+
+export interface CoachApiResult {
+  text: string;
+  source: 'remote' | 'local';
+  provider: 'zhipu' | 'deepseek' | 'qwen' | 'local';
+  model: string;
+  tone?: string;
+  shareReady?: boolean;
+  error?: string;
+}
+
+export interface PilotParticipant {
+  id: string;
+  displayName: string;
+  city: string;
+  teamId: string;
+  totalDistanceKm: number;
+  streakDays: number;
+  submissions: number;
+  shareCards: number;
+  lastSubmitDaysAgo: number;
+  couponTriggered: boolean;
+}
+
+export interface PilotTeam {
+  id: string;
+  name: string;
+  city: string;
+  members: number;
+  totalDistanceKm: number;
+  activeRate: number;
+  shareCards: number;
+}
+
+export interface PilotMetrics {
+  totalParticipants: number;
+  activeToday: number;
+  active7d: number;
+  activeRate: number;
+  totalDistanceKm: number;
+  averageDistanceKm: number;
+  finishers: number;
+  projectedFinishers: number;
+  completionRate: number;
+  shareCards: number;
+  couponTriggered: number;
+  needsWakeup: number;
+}

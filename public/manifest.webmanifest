@@ -1,0 +1,9 @@
+{
+  "name": "HLA Running World",
+  "short_name": "HLA RW",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f1ea",
+  "theme_color": "#ef4f2f",
+  "lang": "zh-CN"
+}

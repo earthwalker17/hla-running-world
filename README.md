@@ -1,0 +1,53 @@
+# HLA Running World Demo
+
+面向海澜之家品牌路演的移动优先 H5 demo。核心闭环为：选择路线 -> 输入今日跑量 -> 真实地图路线推进 -> 节点解锁 / 国内 AI 陪跑反馈 -> 生成个人赛季分享卡。
+
+## 本地运行
+
+```bash
+pnpm install --registry=https://registry.npmmirror.com
+pnpm dev
+```
+
+复制 `.env.example` 为 `.env` 后可开启真实地图和国内 AI：
+
+```bash
+AMAP_KEY=你的高德WebJSKey
+AMAP_SECURITY_CODE=你的高德安全密钥
+# 可选：分享卡静态地图需要高德 Web 服务 Key
+AMAP_STATIC_KEY=你的高德Web服务Key
+AI_PROVIDER=zhipu
+ZHIPU_API_KEY=你的智谱Key
+```
+
+`AI_PROVIDER` 支持 `zhipu`、`deepseek`、`qwen`、`local`。不配置 AI Key 时会自动使用本地规则型陪跑文案；不配置高德 Key 时路线页会显示原本地路线兜底。分享卡会优先使用 `/api/static-map` 生成地图图像；如果高德 Key 不支持 Web 服务静态地图，则回退为基于真实经纬度绘制的地图风格路线。
+
+生产构建和预览：
+
+```bash
+pnpm test
+pnpm build
+pnpm preview
+```
+
+如需本地预览：
+
+```text
+http://127.0.0.1:5173/
+```
+
+## Demo 范围
+
+- 使用 Vue 3、Vite、TypeScript、Vue Router 和 lucide-vue-next。
+- 路线页优先使用高德地图 JS API 2.0，纵向展示三条路线地图、路线折线、节点 Marker 和当前完成进度；无 Key 时回退到本地自绘路线。
+- 跑后页集成地图、跑量输入、AI 陪跑、节点故事和赛季徽章；每次提交跑量后在地图上高亮新增里程并触发推进动画。
+- 赛季数据、路线节点、徽章、1000 人匿名试点数据、跑团榜单和运营看板均为本地演示数据。
+- AI 陪跑通过本地 `/api/coach` 代理调用国内模型，默认智谱 GLM-4.7-Flash，支持 DeepSeek 与阿里云百炼兼容模式；前端超时 20 秒，服务端禁用思考模式并在失败时回退本地规则。
+- 跑量记录保存在浏览器 localStorage，可点击首页右上角按钮重置演示状态，也可一键切换到路演最佳演示状态。
+
+## 验证结果
+
+- 单元测试：`9 passed`
+- 类型检查：`vue-tsc --noEmit` 通过
+- 生产构建：`vite build` 通过
+- 视觉截图：见 `artifacts/screenshots/` 的最新 `v04-*.png`
