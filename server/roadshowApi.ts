@@ -233,8 +233,45 @@ function toStaticMapColor(hex: string): string {
   return `0x${hex.replace('#', '')}`;
 }
 
+function parseStaticPathParam(value: string | null): Array<{ lng: number; lat: number }> {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(';')
+    .slice(0, 120)
+    .map((item) => {
+      const [lng, lat] = item.split(',').map(Number);
+      return Number.isFinite(lng) && Number.isFinite(lat) ? { lng, lat } : null;
+    })
+    .filter((point): point is { lng: number; lat: number } => Boolean(point));
+}
+
+function parseStaticCenterParam(value: string | null): { lng: number; lat: number } | null {
+  if (!value) {
+    return null;
+  }
+
+  const [lng, lat] = value.split(',').map(Number);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? { lng, lat } : null;
+}
+
+function parseStaticZoomParam(value: string | null): string | null {
+  const zoom = Number(value);
+  if (!Number.isFinite(zoom)) {
+    return null;
+  }
+
+  return String(Math.min(17, Math.max(4, Math.round(zoom))));
+}
+
 function getStaticMapUrl(env: Env, requestUrl: string): string | null {
-  const key = env.AMAP_STATIC_KEY || env.AMAP_WEB_SERVICE_KEY || env.AMAP_KEY || env.VITE_AMAP_KEY;
+  const key =
+    env.AMAP_STATIC_KEY ||
+    env.AMAP_WEB_SERVICE_KEY ||
+    env.VITE_AMAP_STATIC_KEY ||
+    env.VITE_AMAP_WEB_SERVICE_KEY;
   if (!key) return null;
 
   const url = new URL(requestUrl, 'http://localhost');
@@ -243,18 +280,20 @@ function getStaticMapUrl(env: Env, requestUrl: string): string | null {
   const route = routes.find((item) => item.id === routeId) ?? routes[0];
   const progressPercent = getProgressPercent(totalDistance, route.distanceKm);
   const completedPath = localMapProvider.getCompletedGeoPath(route, progressPercent);
-  const pathPoints = completedPath.length >= 2 ? completedPath : route.map.path;
+  const clientPath = parseStaticPathParam(url.searchParams.get('path'));
+  const center = parseStaticCenterParam(url.searchParams.get('center')) ?? route.map.center;
+  const zoom = parseStaticZoomParam(url.searchParams.get('zoom')) ?? String(Math.round(route.map.zoom));
+  const pathPoints = clientPath.length >= 2 ? clientPath : completedPath.length >= 2 ? completedPath : route.map.path;
   const path = pathPoints.map((point) => `${point.lng},${point.lat}`).join(';');
-  const markers = route.nodes
-    .map((node) => `${node.coord.lng},${node.coord.lat}`)
-    .join(';');
 
   const params = new URLSearchParams({
     key,
-    size: '750*470',
+    location: `${center.lng},${center.lat}`,
+    zoom,
+    size: '772*396',
     scale: '2',
-    paths: `${route.id === 'jiangyin-city' ? 10 : 8},${toStaticMapColor(route.accent)},0.9,,0:${path}`,
-    markers: `small,0x111111,A:${markers}`,
+    traffic: '0',
+    paths: `${route.id === 'jiangyin-city' ? 8 : 6},${toStaticMapColor(route.accent)},0.45,,0:${path}`,
   });
 
   return `https://restapi.amap.com/v3/staticmap?${params.toString()}`;
@@ -331,7 +370,7 @@ export function createStaticMapHandler(env: Env): Middleware {
 
     const staticMapUrl = getStaticMapUrl(env, request.url || '/');
     if (!staticMapUrl) {
-      sendJson(response, 404, { error: 'missing-amap-key' });
+      sendJson(response, 404, { error: 'missing-amap-static-key' });
       return;
     }
 

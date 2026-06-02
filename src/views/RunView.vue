@@ -17,6 +17,7 @@
       :highlight-from-distance="highlightFromDistance"
       :last-run-distance="store.state.lastRunDistanceKm"
       :animation-key="store.state.shareCardVersion"
+      @route-measured="store.setRouteMeasurement"
     />
 
     <section class="run-card">

@@ -1,6 +1,6 @@
 import { computed, reactive, watch } from 'vue';
-import { createSeedRecords, routes } from '../data/season';
-import type { CoachContext, DemoState, RunRecord, SeasonRoute } from '../types';
+import { createSeedRecords, routes as seedRoutes } from '../data/season';
+import type { CoachContext, DemoState, RouteMeasurement, RunRecord, SeasonRoute } from '../types';
 import { toDateKey } from '../utils/dates';
 import { buildCoachFeedback } from '../services/aiCoach';
 import { requestCoachFeedback } from '../services/coachClient';
@@ -46,7 +46,7 @@ function loadState(): DemoState {
       return createDefaultState();
     }
     const parsed = JSON.parse(raw) as DemoState;
-    if (!routes.some((route) => route.id === parsed.selectedRouteId)) {
+    if (!seedRoutes.some((route) => route.id === parsed.selectedRouteId)) {
       return createDefaultState();
     }
     return {
@@ -77,9 +77,32 @@ function loadState(): DemoState {
 
 function createSeasonStore() {
   const state = reactive<DemoState>(loadState());
+  const routeMeasurements = reactive<Record<string, RouteMeasurement>>({});
+
+  function applyRouteMeasurement(route: SeasonRoute): SeasonRoute {
+    const measurement = routeMeasurements[route.id];
+    if (!measurement) {
+      return route;
+    }
+
+    return {
+      ...route,
+      distanceKm: measurement.distanceKm,
+      map: {
+        ...route.map,
+        path: measurement.path,
+      },
+      nodes: route.nodes.map((node) => ({
+        ...node,
+        km: measurement.nodeKms[node.id] ?? node.km,
+      })),
+    };
+  }
+
+  const routes = computed<SeasonRoute[]>(() => seedRoutes.map((route) => applyRouteMeasurement(route)));
 
   const activeRoute = computed<SeasonRoute>(() => {
-    return routes.find((route) => route.id === state.selectedRouteId) ?? routes[0];
+    return routes.value.find((route) => route.id === state.selectedRouteId) ?? routes.value[0];
   });
 
   const totalDistance = computed(() => getTotalDistance(state.records));
@@ -101,9 +124,34 @@ function createSeasonStore() {
   }
 
   function selectRoute(routeId: string) {
-    if (routes.some((route) => route.id === routeId)) {
+    if (seedRoutes.some((route) => route.id === routeId)) {
       state.selectedRouteId = routeId;
     }
+  }
+
+  function setRouteMeasurement(measurement: RouteMeasurement) {
+    if (
+      !seedRoutes.some((route) => route.id === measurement.routeId) ||
+      measurement.distanceKm <= 0 ||
+      measurement.path.length < 2
+    ) {
+      return;
+    }
+
+    const existing = routeMeasurements[measurement.routeId];
+    const hasSameDistance =
+      existing && Math.abs(existing.distanceKm - measurement.distanceKm) < 0.05;
+    const hasSamePath =
+      existing &&
+      existing.path.length === measurement.path.length &&
+      existing.path[0]?.lng === measurement.path[0]?.lng &&
+      existing.path[existing.path.length - 1]?.lng === measurement.path[measurement.path.length - 1]?.lng;
+
+    if (hasSameDistance && hasSamePath && existing.source === measurement.source) {
+      return;
+    }
+
+    routeMeasurements[measurement.routeId] = measurement;
   }
 
   function buildCoachContext(
@@ -248,6 +296,7 @@ function createSeasonStore() {
     resetDemo,
     resetRoadshowPreset,
     selectRoute,
+    setRouteMeasurement,
   };
 }
 

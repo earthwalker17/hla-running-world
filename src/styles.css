@@ -618,6 +618,16 @@ a {
   background: rgba(32, 143, 115, 0.92);
 }
 
+.map-mode-pill.routing {
+  color: #111111;
+  background: rgba(255, 176, 0, 0.92);
+}
+
+.map-mode-pill.fallback {
+  color: #ffffff;
+  background: rgba(17, 17, 17, 0.82);
+}
+
 .map-mode-pill.error,
 .map-mode-pill.missing-key {
   color: #ffffff;

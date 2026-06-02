@@ -44,12 +44,39 @@ import { RouterLink } from 'vue-router';
 import { Download, PenLine, RefreshCw } from 'lucide-vue-next';
 import { seasonProfile } from '../data/season';
 import { useSeasonStore } from '../state/seasonStore';
+import { loadAmap } from '../services/amapLoader';
+import { localMapProvider } from '../services/mapProvider';
+import { planRoadRoute } from '../services/roadRoutePlanner';
+
+interface MapBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface GeoBounds {
+  minLng: number;
+  maxLng: number;
+  minLat: number;
+  maxLat: number;
+}
+
+interface StaticMapView {
+  center: {
+    lng: number;
+    lat: number;
+  };
+  zoom: number;
+  bounds: GeoBounds;
+}
 
 const store = useSeasonStore();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const route = computed(() => store.activeRoute.value);
 const currentNode = store.currentNode;
 const totalDistance = store.totalDistance;
+let measuredRouteId = '';
 
 function drawRoundedRect(
   ctx: CanvasRenderingContext2D,
@@ -68,20 +95,11 @@ function drawRoundedRect(
   ctx.closePath();
 }
 
-function projectGeoPoint(
-  point: { lng: number; lat: number },
-  bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
-  box: { x: number; y: number; width: number; height: number },
-) {
-  const lngSpan = bounds.maxLng - bounds.minLng || 1;
-  const latSpan = bounds.maxLat - bounds.minLat || 1;
-  return {
-    x: box.x + ((point.lng - bounds.minLng) / lngSpan) * box.width,
-    y: box.y + (1 - (point.lat - bounds.minLat) / latSpan) * box.height,
-  };
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
-function getGeoBounds(points: Array<{ lng: number; lat: number }>) {
+function getGeoBounds(points: Array<{ lng: number; lat: number }>): GeoBounds {
   const lngs = points.map((point) => point.lng);
   const lats = points.map((point) => point.lat);
   const minLng = Math.min(...lngs);
@@ -98,6 +116,68 @@ function getGeoBounds(points: Array<{ lng: number; lat: number }>) {
   };
 }
 
+function toMercator(point: { lng: number; lat: number }) {
+  const sinLat = Math.sin((clamp(point.lat, -85.05112878, 85.05112878) * Math.PI) / 180);
+  return {
+    x: (point.lng + 180) / 360,
+    y: 0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI),
+  };
+}
+
+function fromMercator(point: { x: number; y: number }) {
+  return {
+    lng: point.x * 360 - 180,
+    lat: (Math.atan(Math.sinh(Math.PI * (1 - 2 * point.y))) * 180) / Math.PI,
+  };
+}
+
+function getMercatorBounds(bounds: GeoBounds) {
+  const corners = [
+    { lng: bounds.minLng, lat: bounds.minLat },
+    { lng: bounds.minLng, lat: bounds.maxLat },
+    { lng: bounds.maxLng, lat: bounds.minLat },
+    { lng: bounds.maxLng, lat: bounds.maxLat },
+  ].map((point) => toMercator(point));
+
+  return {
+    minX: Math.min(...corners.map((point) => point.x)),
+    maxX: Math.max(...corners.map((point) => point.x)),
+    minY: Math.min(...corners.map((point) => point.y)),
+    maxY: Math.max(...corners.map((point) => point.y)),
+  };
+}
+
+function getStaticMapView(bounds: GeoBounds, box: MapBox): StaticMapView {
+  const tileSize = 256;
+  const mercatorBounds = getMercatorBounds(bounds);
+  const spanX = Math.max(mercatorBounds.maxX - mercatorBounds.minX, 0.000001);
+  const spanY = Math.max(mercatorBounds.maxY - mercatorBounds.minY, 0.000001);
+  const zoomX = Math.log2(box.width / (tileSize * spanX));
+  const zoomY = Math.log2(box.height / (tileSize * spanY));
+  const zoom = clamp(Math.floor(Math.min(zoomX, zoomY)), 4, 17);
+  const center = fromMercator({
+    x: (mercatorBounds.minX + mercatorBounds.maxX) / 2,
+    y: (mercatorBounds.minY + mercatorBounds.maxY) / 2,
+  });
+
+  return {
+    center,
+    zoom,
+    bounds,
+  };
+}
+
+function projectMercatorPoint(point: { lng: number; lat: number }, view: StaticMapView, box: MapBox) {
+  const scale = 256 * 2 ** view.zoom;
+  const center = toMercator(view.center);
+  const projected = toMercator(point);
+
+  return {
+    x: box.x + box.width / 2 + (projected.x - center.x) * scale,
+    y: box.y + box.height / 2 + (projected.y - center.y) * scale,
+  };
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -107,9 +187,224 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+async function ensureRouteMeasurement() {
+  if (measuredRouteId === route.value.id) {
+    return;
+  }
+
+  measuredRouteId = route.value.id;
+
+  try {
+    const amap = await loadAmap();
+    if (!amap) {
+      return;
+    }
+
+    const plan = await planRoadRoute(amap, route.value);
+    if (plan) {
+      store.setRouteMeasurement(plan);
+      await nextTick();
+    }
+  } catch {
+    // Share card keeps the local route fallback if dynamic route planning is unavailable.
+  }
+}
+
+function sampleStaticPath(points: Array<{ lng: number; lat: number }>, maxPoints = 80) {
+  if (points.length <= maxPoints) {
+    return points;
+  }
+
+  const step = (points.length - 1) / (maxPoints - 1);
+  return Array.from({ length: maxPoints }, (_, index) => points[Math.round(index * step)]);
+}
+
+function getStaticMapPathParam(points: Array<{ lng: number; lat: number }>): string {
+  return sampleStaticPath(points)
+    .map((point) => `${point.lng.toFixed(6)},${point.lat.toFixed(6)}`)
+    .join(';');
+}
+
+function getShareMapView(box: MapBox): StaticMapView {
+  const avatar = localMapProvider.getAvatarGeoPoint(route.value, store.progressPercent.value);
+  const bounds = getGeoBounds([
+    ...route.value.map.path,
+    ...route.value.nodes.map((node) => node.coord),
+    avatar,
+  ]);
+
+  return getStaticMapView(bounds, box);
+}
+
+function drawMapPath(
+  ctx: CanvasRenderingContext2D,
+  points: Array<{ lng: number; lat: number }>,
+  view: StaticMapView,
+  box: MapBox,
+  options: {
+    color: string;
+    width: number;
+    opacity?: number;
+  },
+) {
+  if (points.length < 2) {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = options.opacity ?? 1;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = options.color;
+  ctx.lineWidth = options.width;
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    const projected = projectMercatorPoint(point, view, box);
+    if (index === 0) ctx.moveTo(projected.x, projected.y);
+    else ctx.lineTo(projected.x, projected.y);
+  });
+  ctx.stroke();
+  ctx.restore();
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) {
+    return text;
+  }
+
+  let output = text;
+  while (output.length > 2 && ctx.measureText(`${output.slice(0, -1)}...`).width > maxWidth) {
+    output = output.slice(0, -1);
+  }
+
+  return `${output.slice(0, -1)}...`;
+}
+
+function drawNodeLabel(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  point: { x: number; y: number },
+  box: MapBox,
+  offset: { x: number; y: number },
+  active: boolean,
+) {
+  ctx.font = '800 19px "Microsoft YaHei", Arial, sans-serif';
+  const maxTextWidth = 178;
+  const label = fitText(ctx, text, maxTextWidth);
+  const textWidth = ctx.measureText(label).width;
+  const labelWidth = textWidth + 22;
+  const labelHeight = 32;
+  const x = clamp(point.x + offset.x - labelWidth / 2, box.x + 10, box.x + box.width - labelWidth - 10);
+  const preferredY = point.y + offset.y;
+  const y = clamp(preferredY, box.y + 10, box.y + box.height - labelHeight - 10);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 7;
+  drawRoundedRect(ctx, x, y, labelWidth, labelHeight, 12);
+  ctx.fillStyle = active ? '#111111' : 'rgba(255, 255, 255, 0.94)';
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = active ? '#ffffff' : '#161616';
+  ctx.fillText(label, x + 11, y + 22);
+  ctx.restore();
+}
+
+function drawRunnerMarker(ctx: CanvasRenderingContext2D, point: { x: number; y: number }) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 8;
+  ctx.fillStyle = '#ffb000';
+  ctx.strokeStyle = '#111111';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, 25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = '#111111';
+  ctx.beginPath();
+  ctx.moveTo(point.x - 8, point.y + 5);
+  ctx.lineTo(point.x, point.y - 12);
+  ctx.lineTo(point.x + 10, point.y + 5);
+  ctx.lineTo(point.x + 2, point.y + 2);
+  ctx.lineTo(point.x + 2, point.y + 14);
+  ctx.lineTo(point.x - 3, point.y + 14);
+  ctx.lineTo(point.x - 3, point.y + 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawMapProgressChip(ctx: CanvasRenderingContext2D, box: MapBox) {
+  const progressText = `${totalDistance.value.toFixed(1)} / ${route.value.distanceKm.toFixed(1)} km · ${Math.round(store.progressPercent.value)}%`;
+  ctx.font = '800 20px "Microsoft YaHei", Arial, sans-serif';
+  const width = ctx.measureText(progressText).width + 28;
+  const x = box.x + 18;
+  const y = box.y + box.height - 48;
+
+  ctx.save();
+  drawRoundedRect(ctx, x, y, width, 34, 13);
+  ctx.fillStyle = 'rgba(17, 17, 17, 0.82)';
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(progressText, x + 14, y + 23);
+  ctx.restore();
+}
+
+function drawRouteOverlay(ctx: CanvasRenderingContext2D, box: MapBox, view: StaticMapView) {
+  const fullPath = route.value.map.path;
+  const completedPath = localMapProvider.getCompletedGeoPath(route.value, store.progressPercent.value);
+  const avatar = localMapProvider.getAvatarGeoPoint(route.value, store.progressPercent.value);
+  const labelOffsets = [
+    { x: 0, y: -46 },
+    { x: 62, y: -36 },
+    { x: -62, y: 20 },
+    { x: 62, y: 18 },
+    { x: -62, y: -38 },
+  ];
+
+  ctx.save();
+  drawRoundedRect(ctx, box.x, box.y, box.width, box.height, 24);
+  ctx.clip();
+
+  drawMapPath(ctx, fullPath, view, box, {
+    color: '#c9c4b8',
+    width: 19,
+    opacity: 0.92,
+  });
+  drawMapPath(ctx, completedPath, view, box, {
+    color: route.value.accent,
+    width: 12,
+  });
+
+  route.value.nodes.forEach((node, index) => {
+    const projected = projectMercatorPoint(node.coord, view, box);
+    const unlocked = store.unlockedNodes.value.some((unlockedNode) => unlockedNode.id === node.id);
+    const active = currentNode.value.id === node.id;
+    ctx.fillStyle = unlocked ? '#111111' : '#ffffff';
+    ctx.strokeStyle = active ? '#ffb000' : unlocked ? '#111111' : '#ffffff';
+    ctx.lineWidth = active ? 7 : 5;
+    ctx.beginPath();
+    ctx.arc(projected.x, projected.y, active ? 15 : 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    drawNodeLabel(ctx, node.name, projected, box, labelOffsets[index % labelOffsets.length], active);
+  });
+
+  drawRunnerMarker(ctx, projectMercatorPoint(avatar, view, box));
+  drawMapProgressChip(ctx, box);
+  ctx.restore();
+}
+
 async function drawRealMap(ctx: CanvasRenderingContext2D) {
   const box = { x: 64, y: 318, width: 772, height: 396 };
-  const url = `/api/static-map?routeId=${route.value.id}&totalDistance=${store.totalDistance.value}&v=${store.state.shareCardVersion}`;
+  const view = getShareMapView(box);
+  const path = encodeURIComponent(getStaticMapPathParam(route.value.map.path));
+  const center = `${view.center.lng.toFixed(6)},${view.center.lat.toFixed(6)}`;
+  const url = `/api/static-map?routeId=${route.value.id}&center=${center}&zoom=${view.zoom}&path=${path}&v=${store.state.shareCardVersion}`;
 
   try {
     const image = await loadImage(url);
@@ -118,23 +413,17 @@ async function drawRealMap(ctx: CanvasRenderingContext2D) {
     ctx.clip();
     ctx.drawImage(image, box.x, box.y, box.width, box.height);
     ctx.restore();
+    drawRouteOverlay(ctx, box, view);
   } catch {
-    drawGeoRouteFallback(ctx, box);
+    drawGeoRouteFallback(ctx, box, view);
   }
 }
 
 function drawGeoRouteFallback(
   ctx: CanvasRenderingContext2D,
-  box: { x: number; y: number; width: number; height: number },
+  box: MapBox,
+  view: StaticMapView,
 ) {
-  const pathPoints = route.value.map.path;
-  const bounds = getGeoBounds(pathPoints);
-  const completed = route.value.map.path.filter((point) => point.at <= store.progressPercent.value / 100);
-  const avatar = route.value.map.path.reduce((closest, point) => {
-    const target = store.progressPercent.value / 100;
-    return Math.abs(point.at - target) < Math.abs(closest.at - target) ? point : closest;
-  }, route.value.map.path[0]);
-
   ctx.save();
   drawRoundedRect(ctx, box.x, box.y, box.width, box.height, 24);
   ctx.fillStyle = '#e8eee8';
@@ -154,47 +443,8 @@ function drawGeoRouteFallback(
     ctx.lineTo(box.x + box.width, y);
     ctx.stroke();
   }
-
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#c7c2b6';
-  ctx.lineWidth = 18;
-  ctx.beginPath();
-  pathPoints.forEach((point, index) => {
-    const projected = projectGeoPoint(point, bounds, box);
-    if (index === 0) ctx.moveTo(projected.x, projected.y);
-    else ctx.lineTo(projected.x, projected.y);
-  });
-  ctx.stroke();
-
-  ctx.strokeStyle = route.value.accent;
-  ctx.lineWidth = 12;
-  ctx.beginPath();
-  (completed.length >= 2 ? completed : [pathPoints[0]]).forEach((point, index) => {
-    const projected = projectGeoPoint(point, bounds, box);
-    if (index === 0) ctx.moveTo(projected.x, projected.y);
-    else ctx.lineTo(projected.x, projected.y);
-  });
-  ctx.stroke();
-
-  route.value.nodes.forEach((node) => {
-    const { x, y } = projectGeoPoint(node.coord, bounds, box);
-    const unlocked = store.unlockedNodes.value.some((unlockedNode) => unlockedNode.id === node.id);
-    ctx.fillStyle = unlocked ? '#111111' : '#ffffff';
-    ctx.strokeStyle = unlocked ? '#111111' : '#bcb6a9';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(x, y, unlocked ? 14 : 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  });
-
-  const avatarPoint = projectGeoPoint(avatar, bounds, box);
-  ctx.fillStyle = '#ffb000';
-  ctx.beginPath();
-  ctx.arc(avatarPoint.x, avatarPoint.y, 24, 0, Math.PI * 2);
-  ctx.fill();
   ctx.restore();
+  drawRouteOverlay(ctx, box, view);
 }
 
 function drawQrPlaceholder(ctx: CanvasRenderingContext2D) {
@@ -214,6 +464,8 @@ function drawQrPlaceholder(ctx: CanvasRenderingContext2D) {
 }
 
 async function drawCard() {
+  void ensureRouteMeasurement();
+
   const canvas = canvasRef.value;
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -259,10 +511,17 @@ async function drawCard() {
 function downloadCard() {
   const canvas = canvasRef.value;
   if (!canvas) return;
-  const link = document.createElement('a');
-  link.href = canvas.toDataURL('image/png');
-  link.download = 'hla-running-world-share-card.png';
-  link.click();
+
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = 'hla-running-world-share-card.png';
+    link.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
 }
 
 onMounted(async () => {
@@ -274,6 +533,9 @@ watch(
   () => [
     store.totalDistance.value,
     store.progressPercent.value,
+    route.value.distanceKm,
+    route.value.map.path.length,
+    currentNode.value.id,
     store.activeRoute.value.id,
     store.state.shareCardVersion,
   ],

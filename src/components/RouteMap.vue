@@ -9,7 +9,7 @@
         <span class="eyebrow">Digital Route</span>
         <h2>{{ route.title }}</h2>
       </div>
-      <strong>{{ Math.round(progressPercent) }}%</strong>
+      <strong>{{ Math.round(effectiveProgressPercent) }}%</strong>
     </div>
 
     <div class="map-viewport" :class="{ real: isRealMapActive }">
@@ -80,10 +80,11 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import type { SeasonRoute } from '../types';
+import type { RouteMeasurement, SeasonRoute } from '../types';
 import type { AMapNamespace } from '../services/amapLoader';
 import { loadAmap } from '../services/amapLoader';
 import { localMapProvider } from '../services/mapProvider';
+import { planRoadRoute, type RoadRoutePlan } from '../services/roadRoutePlanner';
 import {
   getCurrentNode,
   getDistanceToNextNode,
@@ -113,15 +114,44 @@ const props = withDefaults(
   },
 );
 
+const emit = defineEmits<{
+  'route-measured': [measurement: RouteMeasurement];
+}>();
+
 const gradientId = computed(() => `routeGradient-${props.route.id}`);
-const polylinePoints = computed(() => props.route.points.map((point) => `${point.x},${point.y}`).join(' '));
-const avatarPoint = computed(() => localMapProvider.getAvatarPoint(props.route, props.progressPercent));
-const currentNode = computed(() => getCurrentNode(props.route, props.totalDistance));
-const unlockedNodes = computed(() => getUnlockedNodes(props.route, props.totalDistance));
-const distanceToNextNode = computed(() => getDistanceToNextNode(props.route, props.totalDistance));
-const strokeDashoffset = computed(() => `${520 - (Math.min(100, props.progressPercent) / 100) * 520}`);
+const plannedRoute = shallowRef<RoadRoutePlan | null>(null);
+const effectiveRoute = computed<SeasonRoute>(() => {
+  const plan = plannedRoute.value;
+  if (!plan || plan.routeId !== props.route.id) {
+    return props.route;
+  }
+
+  return {
+    ...props.route,
+    distanceKm: plan.distanceKm,
+    map: {
+      ...props.route.map,
+      path: plan.path,
+    },
+    nodes: props.route.nodes.map((node) => ({
+      ...node,
+      km: plan.nodeKms[node.id] ?? node.km,
+    })),
+  };
+});
+const effectiveProgressPercent = computed(() =>
+  getProgressPercent(props.totalDistance, effectiveRoute.value.distanceKm),
+);
+const polylinePoints = computed(() => effectiveRoute.value.points.map((point) => `${point.x},${point.y}`).join(' '));
+const avatarPoint = computed(() =>
+  localMapProvider.getAvatarPoint(effectiveRoute.value, effectiveProgressPercent.value),
+);
+const currentNode = computed(() => getCurrentNode(effectiveRoute.value, props.totalDistance));
+const unlockedNodes = computed(() => getUnlockedNodes(effectiveRoute.value, props.totalDistance));
+const distanceToNextNode = computed(() => getDistanceToNextNode(effectiveRoute.value, props.totalDistance));
+const strokeDashoffset = computed(() => `${520 - (Math.min(100, effectiveProgressPercent.value) / 100) * 520}`);
 const deltaStartPercent = computed(() =>
-  getProgressPercent(Math.max(0, props.highlightFromDistance), props.route.distanceKm),
+  getProgressPercent(Math.max(0, props.highlightFromDistance), effectiveRoute.value.distanceKm),
 );
 const shouldAnimateDelta = computed(
   () => props.lastRunDistance > 0 && props.highlightFromDistance < props.totalDistance,
@@ -129,27 +159,30 @@ const shouldAnimateDelta = computed(
 const deltaPolylinePoints = computed(() => {
   if (!shouldAnimateDelta.value) return '';
   return localMapProvider
-    .getRoutePointsBetween(props.route, deltaStartPercent.value, props.progressPercent)
+    .getRoutePointsBetween(effectiveRoute.value, deltaStartPercent.value, effectiveProgressPercent.value)
     .map((point) => `${point.x},${point.y}`)
     .join(' ');
 });
 const mapContainer = ref<HTMLDivElement | null>(null);
-const mapStatus = ref<'loading' | 'ready' | 'missing-key' | 'error'>('loading');
+const mapStatus = ref<'loading' | 'routing' | 'ready' | 'fallback' | 'missing-key' | 'error'>('loading');
 const isRealMapActive = ref(false);
 const amapRef = shallowRef<AMapNamespace | null>(null);
 const mapRef = shallowRef<unknown | null>(null);
 let overlays: unknown[] = [];
+let routePlanRequestId = 0;
 
 const mapModeLabel = computed(() => {
-  if (mapStatus.value === 'ready') return '真实地图';
+  if (mapStatus.value === 'ready') return '实线路线';
+  if (mapStatus.value === 'routing') return '规划实线路线';
+  if (mapStatus.value === 'fallback') return '真实地图 · 路线兜底';
   if (mapStatus.value === 'loading') return '地图加载中';
   if (mapStatus.value === 'missing-key') return '本地兜底 · 待配置高德 Key';
   return '本地兜底 · 地图加载失败';
 });
 
 const nodeMarkers = computed(() =>
-  props.route.nodes.map((node) => {
-    const point = localMapProvider.getNodePoint(props.route, node);
+  effectiveRoute.value.nodes.map((node) => {
+    const point = localMapProvider.getNodePoint(effectiveRoute.value, node);
     return {
       ...node,
       x: point.x,
@@ -185,6 +218,18 @@ function fitRouteToView(routeLine: unknown) {
   }, 80);
 }
 
+function resetMapViewport() {
+  const amap = amapRef.value;
+  const map = mapRef.value as {
+    setCenter?: (center: unknown) => void;
+    setZoom?: (zoom: number) => void;
+  } | null;
+
+  if (!amap || !map) return;
+  map.setCenter?.(toLngLat(amap, props.route.map.center));
+  map.setZoom?.(props.route.map.zoom);
+}
+
 function updateRealMap() {
   const amap = amapRef.value;
   const map = mapRef.value as {
@@ -194,13 +239,14 @@ function updateRealMap() {
 
   clearOverlays();
 
-  const fullPath = props.route.map.path.map((point) => toLngLat(amap, point));
+  const route = effectiveRoute.value;
+  const fullPath = route.map.path.map((point) => toLngLat(amap, point));
   const completedPath = localMapProvider
-    .getCompletedGeoPath(props.route, props.progressPercent)
+    .getCompletedGeoPath(route, effectiveProgressPercent.value)
     .map((point) => toLngLat(amap, point));
   const deltaPath = shouldAnimateDelta.value
     ? localMapProvider
-        .getGeoPathBetween(props.route, deltaStartPercent.value, props.progressPercent)
+        .getGeoPathBetween(route, deltaStartPercent.value, effectiveProgressPercent.value)
         .map((point) => toLngLat(amap, point))
     : [];
   const routeLine = new amap.Polyline({
@@ -217,7 +263,7 @@ function updateRealMap() {
     routeLine,
     new amap.Polyline({
       path: completedPath,
-      strokeColor: props.route.accent,
+      strokeColor: route.accent,
       strokeOpacity: 0.98,
       strokeWeight: props.compact ? 5 : 7,
       lineJoin: 'round',
@@ -240,12 +286,12 @@ function updateRealMap() {
     );
   }
 
-  props.route.nodes.forEach((node) => {
+  route.nodes.forEach((node) => {
     const unlocked = unlockedNodes.value.some((unlockedNode) => unlockedNode.id === node.id);
     const current = currentNode.value.id === node.id;
     overlays.push(
       new amap.Marker({
-        position: toLngLat(amap, localMapProvider.getNodeGeoPoint(props.route, node)),
+        position: toLngLat(amap, localMapProvider.getNodeGeoPoint(route, node)),
         content: `<div class="amap-node-marker ${unlocked ? 'unlocked' : ''} ${current ? 'current' : ''}"><span>${node.mapLabel ?? node.city}</span></div>`,
         offset: new amap.Pixel(-18, -18),
         zIndex: current ? 80 : 52,
@@ -253,7 +299,7 @@ function updateRealMap() {
     );
   });
 
-  const avatar = localMapProvider.getAvatarGeoPoint(props.route, props.progressPercent);
+  const avatar = localMapProvider.getAvatarGeoPoint(route, effectiveProgressPercent.value);
   overlays.push(
     new amap.Marker({
       position: toLngLat(amap, avatar),
@@ -265,6 +311,27 @@ function updateRealMap() {
 
   map.add?.(overlays);
   fitRouteToView(routeLine);
+}
+
+async function resolveRoadRoute(amap: AMapNamespace) {
+  const requestId = ++routePlanRequestId;
+  mapStatus.value = 'routing';
+
+  const plan = await planRoadRoute(amap, props.route);
+  if (requestId !== routePlanRequestId || (plan && props.route.id !== plan.routeId)) {
+    return;
+  }
+
+  if (plan) {
+    plannedRoute.value = plan;
+    emit('route-measured', plan);
+    mapStatus.value = 'ready';
+  } else {
+    plannedRoute.value = null;
+    mapStatus.value = 'fallback';
+  }
+
+  updateRealMap();
 }
 
 async function initRealMap() {
@@ -291,8 +358,9 @@ async function initRealMap() {
       pitchEnable: false,
     });
     isRealMapActive.value = true;
-    mapStatus.value = 'ready';
+    mapStatus.value = 'routing';
     updateRealMap();
+    void resolveRoadRoute(amap);
   } catch {
     mapStatus.value = 'error';
     isRealMapActive.value = false;
@@ -312,12 +380,27 @@ onBeforeUnmount(() => {
 watch(
   () => [
     props.route.id,
+    props.route.distanceKm,
     props.totalDistance,
-    props.progressPercent,
+    effectiveProgressPercent.value,
     props.highlightFromDistance,
     props.lastRunDistance,
     props.animationKey,
+    plannedRoute.value?.path.length ?? 0,
   ],
   () => updateRealMap(),
+);
+
+watch(
+  () => props.route.id,
+  () => {
+    plannedRoute.value = null;
+    routePlanRequestId += 1;
+    resetMapViewport();
+    updateRealMap();
+    if (amapRef.value) {
+      void resolveRoadRoute(amapRef.value);
+    }
+  },
 );
 </script>

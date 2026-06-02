@@ -2,12 +2,27 @@ import { loadRoadshowConfig } from './roadshowConfig';
 
 type AMapConstructor<T> = new (...args: unknown[]) => T;
 
+export interface AMapLngLatLike {
+  lng?: number;
+  lat?: number;
+  getLng?: () => number;
+  getLat?: () => number;
+}
+
+export interface AMapRoutePlannerInstance {
+  search: (...args: unknown[]) => void;
+  clear?: () => void;
+}
+
 export interface AMapNamespace {
   Map: AMapConstructor<unknown>;
   LngLat: AMapConstructor<unknown>;
   Polyline: AMapConstructor<unknown>;
   Marker: AMapConstructor<unknown>;
   Pixel: AMapConstructor<unknown>;
+  Walking?: AMapConstructor<AMapRoutePlannerInstance>;
+  Driving?: AMapConstructor<AMapRoutePlannerInstance>;
+  plugin?: (plugins: string | string[], callback: () => void) => void;
 }
 
 declare global {

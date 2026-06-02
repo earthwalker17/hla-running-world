@@ -56,7 +56,7 @@
       </div>
       <div class="route-list">
         <button
-          v-for="route in store.routes"
+          v-for="route in routes"
           :key="route.id"
           class="route-card"
           :class="{ selected: route.id === activeRoute.id }"
@@ -71,7 +71,7 @@
             </div>
           </div>
           <div class="route-card-meta">
-            <b>{{ route.distanceKm }} km</b>
+            <b>{{ formatDistanceKm(route.distanceKm) }} km</b>
           </div>
         </button>
       </div>
@@ -107,11 +107,16 @@ import { pilotMetrics, topPilotTeams } from '../data/pilot';
 import { useSeasonStore } from '../state/seasonStore';
 
 const store = useSeasonStore();
+const routes = store.routes;
 const activeRoute = computed(() => store.activeRoute.value);
 const progressPercent = store.progressPercent;
 const totalDistance = store.totalDistance;
 
 function selectRoute(routeId: string) {
   store.selectRoute(routeId);
+}
+
+function formatDistanceKm(distanceKm: number): string {
+  return Number.isInteger(distanceKm) ? String(distanceKm) : distanceKm.toFixed(1);
 }
 </script>

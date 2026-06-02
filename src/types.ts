@@ -15,10 +15,18 @@ export interface RouteMapPoint extends RouteGeoPoint {
   at: number;
 }
 
+export type RoutePlanningMode = 'walking' | 'driving';
+
+export type RoutePlanSource = 'amap-walking' | 'amap-driving' | 'amap-mixed' | 'local-fallback';
+
 export interface RouteMapConfig {
   center: RouteGeoPoint;
   zoom: number;
   path: RouteMapPoint[];
+  routing?: {
+    mode: RoutePlanningMode;
+    fallbackMode?: RoutePlanningMode;
+  };
 }
 
 export interface RouteNode {
@@ -52,6 +60,14 @@ export interface SeasonRoute {
   map: RouteMapConfig;
   nodes: RouteNode[];
   rewards: RouteReward[];
+}
+
+export interface RouteMeasurement {
+  routeId: string;
+  distanceKm: number;
+  nodeKms: Record<string, number>;
+  path: RouteMapPoint[];
+  source: RoutePlanSource;
 }
 
 export interface Badge {

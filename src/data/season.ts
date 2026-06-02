@@ -30,6 +30,10 @@ export const routes: SeasonRoute[] = [
     map: {
       center: { lng: 120.42, lat: 31.86 },
       zoom: 10.6,
+      routing: {
+        mode: 'walking',
+        fallbackMode: 'driving',
+      },
       path: [
         { at: 0, lng: 120.59, lat: 31.84 },
         { at: 0.2, lng: 120.55, lat: 31.84 },
@@ -117,6 +121,9 @@ export const routes: SeasonRoute[] = [
     map: {
       center: { lng: 119.62, lat: 31.86 },
       zoom: 7.4,
+      routing: {
+        mode: 'driving',
+      },
       path: [
         { at: 0, lng: 118.8, lat: 32.06 },
         { at: 0.24, lng: 119.42, lat: 32.19 },
@@ -189,6 +196,9 @@ export const routes: SeasonRoute[] = [
     map: {
       center: { lng: 119.2, lat: 32.7 },
       zoom: 6.4,
+      routing: {
+        mode: 'driving',
+      },
       path: [
         { at: 0, lng: 118.8, lat: 32.06 },
         { at: 0.28, lng: 117.19, lat: 34.26 },
@@ -215,6 +225,15 @@ export const routes: SeasonRoute[] = [
         coord: { lng: 117.19, lat: 34.26 },
         story: '高跑量用户进入挑战段，榜单竞争开始升温。',
         brandHint: '核心跑者章',
+      },
+      {
+        id: 'loop-lianyungang',
+        name: '连云港海岸补给站',
+        city: '连云港',
+        km: 210,
+        coord: { lng: 119.22, lat: 34.6 },
+        story: '海岸补给站解锁，旗舰路线从城市挑战进入跨城远征。',
+        brandHint: '海岸补给彩蛋',
       },
       {
         id: 'loop-suzhou',

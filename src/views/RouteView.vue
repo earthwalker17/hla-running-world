@@ -12,7 +12,7 @@
 
     <section class="route-gallery">
       <article
-        v-for="route in store.routes"
+        v-for="route in routes"
         :key="route.id"
         class="route-overview-card"
         :class="{ selected: route.id === activeRoute.id }"
@@ -22,10 +22,11 @@
           :total-distance="totalDistance"
           :progress-percent="getRouteProgress(route)"
           compact
+          @route-measured="store.setRouteMeasurement"
         />
         <div class="route-overview-copy">
           <div>
-            <span>{{ route.durationDays }} 天 · {{ route.distanceKm }} km</span>
+            <span>{{ route.durationDays }} 天 · {{ formatDistanceKm(route.distanceKm) }} km</span>
             <strong>{{ route.title }}</strong>
             <p>{{ route.summary }}</p>
           </div>
@@ -50,11 +51,16 @@ import { getProgressPercent } from '../services/progress';
 
 const router = useRouter();
 const store = useSeasonStore();
+const routes = store.routes;
 const activeRoute = computed(() => store.activeRoute.value);
 const totalDistance = store.totalDistance;
 
 function getRouteProgress(route: SeasonRoute): number {
   return getProgressPercent(totalDistance.value, route.distanceKm);
+}
+
+function formatDistanceKm(distanceKm: number): string {
+  return Number.isInteger(distanceKm) ? String(distanceKm) : distanceKm.toFixed(1);
 }
 
 function selectAndRun(routeId: string) {
