@@ -36,15 +36,15 @@
 
     <section class="metrics-grid" aria-label="赛季数据">
       <MetricTile label="累计跑量" :value="`${totalDistance.toFixed(1)} km`" />
-      <MetricTile label="试点跑者" :value="pilotMetrics.totalParticipants.toLocaleString('zh-CN')" />
-      <MetricTile label="7 日活跃" :value="`${Math.round(pilotMetrics.activeRate * 100)}%`" />
-      <MetricTile label="分享卡" :value="`${pilotMetrics.shareCards.toLocaleString('zh-CN')} 张`" />
+      <MetricTile label="社区跑者" :value="communityMetrics.totalParticipants.toLocaleString('zh-CN')" />
+      <MetricTile label="7 日活跃" :value="`${Math.round(communityMetrics.activeRate * 100)}%`" />
+      <MetricTile label="分享卡" :value="`${communityMetrics.shareCards.toLocaleString('zh-CN')} 张`" />
     </section>
 
-    <RouterLink class="pilot-cta" to="/pilot">
+    <RouterLink class="profile-cta" to="/profile">
       <div>
-        <span>Roadshow Pilot</span>
-        <strong>1000 人封闭试点看板</strong>
+        <span>Runner Profile</span>
+        <strong>我的赛季与跑团排行</strong>
       </div>
       <ChevronRight :size="18" />
     </RouterLink>
@@ -83,7 +83,7 @@
         <span>今日更新</span>
       </div>
       <div class="rank-list">
-        <div v-for="(team, index) in topPilotTeams.slice(0, 3)" :key="team.id" class="rank-row">
+        <div v-for="(team, index) in topCommunityTeams.slice(0, 3)" :key="team.id" class="rank-row">
           <span>{{ index + 1 }}</span>
           <div>
             <strong>{{ team.name }}</strong>
@@ -103,7 +103,7 @@ import { ChevronRight, Map, PenLine, RotateCcw, Sparkles } from 'lucide-vue-next
 import MetricTile from '../components/MetricTile.vue';
 import ProgressRing from '../components/ProgressRing.vue';
 import { seasonProfile } from '../data/season';
-import { pilotMetrics, topPilotTeams } from '../data/pilot';
+import { communityMetrics, topCommunityTeams } from '../data/community';
 import { useSeasonStore } from '../state/seasonStore';
 
 const store = useSeasonStore();

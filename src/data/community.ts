@@ -1,4 +1,9 @@
-import type { PilotMetrics, PilotParticipant, PilotTeam } from '../types';
+import type {
+  CommunityMetrics,
+  CommunityParticipant,
+  CommunityRunnerStats,
+  CommunityTeam,
+} from '../types';
 import { roundKm } from '../services/progress';
 
 const cities = ['江阴', '无锡', '南京', '苏州', '常州', '镇江', '徐州', '连云港'];
@@ -24,7 +29,7 @@ function seededRandom(seed: number): number {
   return value - Math.floor(value);
 }
 
-function createTeam(index: number): PilotTeam {
+function createTeam(index: number): CommunityTeam {
   const nameSeed = teamNames[index % teamNames.length];
   const suffix = index >= teamNames.length ? ` ${Math.floor(index / teamNames.length) + 1}` : '';
   return {
@@ -38,7 +43,7 @@ function createTeam(index: number): PilotTeam {
   };
 }
 
-export function createPilotParticipants(count = 1000, teamCount = 42): PilotParticipant[] {
+export function createCommunityParticipants(count = 1000, teamCount = 42): CommunityParticipant[] {
   return Array.from({ length: count }, (_, index) => {
     const serial = index + 1;
     const activity = seededRandom(serial);
@@ -50,11 +55,12 @@ export function createPilotParticipants(count = 1000, teamCount = 42): PilotPart
     const lastSubmitDaysAgo = Math.floor(Math.pow(seededRandom(serial + 71), 1.8) * 15);
     const totalDistanceKm = roundKm(baseDistance);
     const shareCards = Math.max(0, Math.round(seededRandom(serial + 53) * 5 + (totalDistanceKm >= 42.8 ? 2 : 0)));
+    const city = cities[Math.floor(seededRandom(serial + 11) * cities.length)];
 
     return {
       id: `runner-${String(serial).padStart(4, '0')}`,
-      displayName: `匿名跑者 ${String(serial).padStart(3, '0')}`,
-      city: cities[Math.floor(seededRandom(serial + 11) * cities.length)],
+      displayName: `${city}跑友 ${String(serial).padStart(3, '0')}`,
+      city,
       teamId: `team-${String(teamIndex + 1).padStart(2, '0')}`,
       totalDistanceKm,
       streakDays,
@@ -66,7 +72,10 @@ export function createPilotParticipants(count = 1000, teamCount = 42): PilotPart
   });
 }
 
-export function createPilotTeams(participants: PilotParticipant[], teamCount = 42): PilotTeam[] {
+export function createCommunityTeams(
+  participants: CommunityParticipant[],
+  teamCount = 42,
+): CommunityTeam[] {
   const teams = Array.from({ length: teamCount }, (_, index) => createTeam(index));
 
   participants.forEach((participant) => {
@@ -88,10 +97,10 @@ export function createPilotTeams(participants: PilotParticipant[], teamCount = 4
   });
 }
 
-export function getPilotMetrics(
-  participants: PilotParticipant[],
+export function getCommunityMetrics(
+  participants: CommunityParticipant[],
   routeDistanceKm = 42.8,
-): PilotMetrics {
+): CommunityMetrics {
   const totalParticipants = participants.length;
   const activeToday = participants.filter((participant) => participant.lastSubmitDaysAgo === 0).length;
   const active7d = participants.filter((participant) => participant.lastSubmitDaysAgo <= 6).length;
@@ -125,30 +134,80 @@ export function getPilotMetrics(
   };
 }
 
-export const pilotParticipants = createPilotParticipants();
-export const pilotTeams = createPilotTeams(pilotParticipants);
-export const pilotMetrics = getPilotMetrics(pilotParticipants);
-export const topPilotTeams = [...pilotTeams]
+export const communityParticipants = createCommunityParticipants();
+export const communityTeams = createCommunityTeams(communityParticipants);
+export const communityMetrics = getCommunityMetrics(communityParticipants);
+export const topCommunityTeams = [...communityTeams]
   .sort((a, b) => b.totalDistanceKm - a.totalDistanceKm)
   .slice(0, 6);
+
+export const currentRunner: CommunityParticipant = {
+  id: 'runner-current',
+  displayName: '林若舟',
+  city: '江阴',
+  teamId: 'team-01',
+  totalDistanceKm: 37.6,
+  streakDays: 8,
+  submissions: 14,
+  shareCards: 3,
+  lastSubmitDaysAgo: 0,
+  couponTriggered: true,
+};
+
+function getRunnerRank(
+  runner: CommunityParticipant,
+  participants: CommunityParticipant[],
+): number {
+  return participants.filter((participant) => participant.totalDistanceKm > runner.totalDistanceKm).length + 1;
+}
+
+export function getCommunityRunnerStats(
+  runner: CommunityParticipant,
+  participants: CommunityParticipant[],
+  teams: CommunityTeam[],
+): CommunityRunnerStats {
+  const team = teams.find((item) => item.id === runner.teamId) ?? teams[0];
+  const sameTeamParticipants = participants.filter((participant) => participant.teamId === runner.teamId);
+  const overallRank = getRunnerRank(runner, participants);
+  const teamRank = getRunnerRank(runner, sameTeamParticipants);
+  const overallTotal = participants.length + 1;
+  const teamMembers = sameTeamParticipants.length + 1;
+
+  return {
+    overallRank,
+    overallTotal,
+    teamRank,
+    teamMembers,
+    teamName: team.name,
+    teamCity: team.city,
+    teamTotalDistanceKm: roundKm(team.totalDistanceKm + runner.totalDistanceKm),
+    communityPercentile: Math.round(((overallTotal - overallRank + 1) / overallTotal) * 100),
+  };
+}
+
+export const currentRunnerStats = getCommunityRunnerStats(
+  currentRunner,
+  communityParticipants,
+  communityTeams,
+);
 
 export const wakeupSegments = [
   {
     id: 'newcomer',
     title: '新手待推进',
-    count: pilotParticipants.filter((participant) => participant.totalDistanceKm < 12).length,
+    count: communityParticipants.filter((participant) => participant.totalDistanceKm < 12).length,
     hint: '适合推送 5 km 轻量任务',
   },
   {
     id: 'inactive',
     title: '7 天未提交',
-    count: pilotParticipants.filter((participant) => participant.lastSubmitDaysAgo >= 7).length,
+    count: communityParticipants.filter((participant) => participant.lastSubmitDaysAgo >= 7).length,
     hint: '适合跑团群提醒和权益召回',
   },
   {
     id: 'near-finish',
     title: '临近完赛',
-    count: pilotParticipants.filter(
+    count: communityParticipants.filter(
       (participant) => participant.totalDistanceKm >= 34 && participant.totalDistanceKm < 42.8,
     ).length,
     hint: '适合触发完赛卡和装备券提示',

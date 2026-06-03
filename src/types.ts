@@ -146,7 +146,7 @@ export interface CoachApiResult {
   error?: string;
 }
 
-export interface PilotParticipant {
+export interface CommunityParticipant {
   id: string;
   displayName: string;
   city: string;
@@ -159,7 +159,7 @@ export interface PilotParticipant {
   couponTriggered: boolean;
 }
 
-export interface PilotTeam {
+export interface CommunityTeam {
   id: string;
   name: string;
   city: string;
@@ -169,7 +169,7 @@ export interface PilotTeam {
   shareCards: number;
 }
 
-export interface PilotMetrics {
+export interface CommunityMetrics {
   totalParticipants: number;
   activeToday: number;
   active7d: number;
@@ -182,4 +182,15 @@ export interface PilotMetrics {
   shareCards: number;
   couponTriggered: number;
   needsWakeup: number;
+}
+
+export interface CommunityRunnerStats {
+  overallRank: number;
+  overallTotal: number;
+  teamRank: number;
+  teamMembers: number;
+  teamName: string;
+  teamCity: string;
+  teamTotalDistanceKm: number;
+  communityPercentile: number;
 }

@@ -31,8 +31,11 @@
         <span>路演样张</span>
       </div>
       <div class="share-copy">
-        <strong>{{ route.title }}</strong>
-        <p>累计 {{ totalDistance.toFixed(1) }} km，抵达 {{ currentNode.name }}。</p>
+        <strong>{{ profileRunner.displayName }} · {{ route.title }}</strong>
+        <p>
+          {{ runnerStats.teamName }}，累计 {{ totalDistance.toFixed(1) }} km，
+          全体排名 #{{ runnerStats.overallRank }}。
+        </p>
       </div>
     </section>
   </div>
@@ -42,6 +45,12 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { Download, PenLine, RefreshCw } from 'lucide-vue-next';
+import {
+  communityParticipants,
+  communityTeams,
+  currentRunner,
+  getCommunityRunnerStats,
+} from '../data/community';
 import { seasonProfile } from '../data/season';
 import { useSeasonStore } from '../state/seasonStore';
 import { loadAmap } from '../services/amapLoader';
@@ -76,6 +85,17 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 const route = computed(() => store.activeRoute.value);
 const currentNode = store.currentNode;
 const totalDistance = store.totalDistance;
+const profileRunner = computed(() => ({
+  ...currentRunner,
+  totalDistanceKm: totalDistance.value,
+  streakDays: store.streakDays.value,
+  submissions: store.state.records.length,
+  shareCards: currentRunner.shareCards + Math.max(0, store.state.shareCardVersion),
+  couponTriggered: totalDistance.value >= 24.4,
+}));
+const runnerStats = computed(() =>
+  getCommunityRunnerStats(profileRunner.value, communityParticipants, communityTeams),
+);
 let measuredRouteId = '';
 
 function drawRoundedRect(
@@ -463,6 +483,28 @@ function drawQrPlaceholder(ctx: CanvasRenderingContext2D) {
   }
 }
 
+function drawProfileAvatar(ctx: CanvasRenderingContext2D) {
+  const centerX = 768;
+  const centerY = 124;
+
+  ctx.save();
+  ctx.fillStyle = '#ffb000';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.82)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 48, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#111111';
+  ctx.font = '900 42px "Microsoft YaHei", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(profileRunner.value.displayName.slice(0, 1), centerX, centerY + 1);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+}
+
 async function drawCard() {
   void ensureRouteMeasurement();
 
@@ -481,12 +523,19 @@ async function drawCard() {
   ctx.fillRect(0, 250, canvas.width, 20);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = '700 42px "Microsoft YaHei", Arial, sans-serif';
-  ctx.fillText(seasonProfile.name, 64, 92);
-  ctx.font = '500 28px "Microsoft YaHei", Arial, sans-serif';
-  ctx.fillText('江苏数字跑步赛季', 64, 142);
-  ctx.font = '700 86px "Microsoft YaHei", Arial, sans-serif';
-  ctx.fillText(`${store.totalDistance.value.toFixed(1)} km`, 64, 228);
+  ctx.font = '700 40px "Microsoft YaHei", Arial, sans-serif';
+  ctx.fillText(seasonProfile.name, 64, 82);
+  ctx.font = '700 28px "Microsoft YaHei", Arial, sans-serif';
+  ctx.fillText(`${profileRunner.value.displayName} · ${runnerStats.value.teamName}`, 64, 132);
+  ctx.font = '500 24px "Microsoft YaHei", Arial, sans-serif';
+  ctx.fillText(
+    `${profileRunner.value.city} · 连续 ${profileRunner.value.streakDays} 天 · 全体 #${runnerStats.value.overallRank}`,
+    64,
+    172,
+  );
+  ctx.font = '700 76px "Microsoft YaHei", Arial, sans-serif';
+  ctx.fillText(`${store.totalDistance.value.toFixed(1)} km`, 64, 242);
+  drawProfileAvatar(ctx);
 
   await drawRealMap(ctx);
 
@@ -501,10 +550,11 @@ async function drawCard() {
   ctx.fillStyle = '#59554c';
   ctx.font = '500 24px "Microsoft YaHei", Arial, sans-serif';
   ctx.fillText(`完成 ${Math.round(store.progressPercent.value)}% · 连续 ${store.streakDays.value} 天`, 96, 940);
+  ctx.fillText(`跑团排名 #${runnerStats.value.teamRank} · 分享卡 ${profileRunner.value.shareCards} 张`, 96, 982);
 
   ctx.fillStyle = '#111111';
   ctx.font = '700 28px "Microsoft YaHei", Arial, sans-serif';
-  ctx.fillText('把真实跑步，变成 30 天品牌数字远征。', 64, 1092);
+  ctx.fillText('每一次训练，都让品牌陪伴自然发生。', 64, 1092);
   drawQrPlaceholder(ctx);
 }
 
