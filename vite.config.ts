@@ -1,17 +1,24 @@
 import { defineConfig } from 'vitest/config';
 import { loadEnv, type Plugin } from 'vite';
 import vue from '@vitejs/plugin-vue';
-import { createCoachApiHandler, createDemoConfigHandler, createStaticMapHandler } from './server/roadshowApi';
+import {
+  createCoachApiHandler,
+  createCoachChatApiHandler,
+  createDemoConfigHandler,
+  createStaticMapHandler,
+} from './server/roadshowApi';
 
 function roadshowApiPlugin(env: Record<string, string | undefined>): Plugin {
   return {
     name: 'hla-roadshow-api',
     configureServer(server) {
+      server.middlewares.use('/api/running-coach-chat', createCoachChatApiHandler(env));
       server.middlewares.use('/api/coach', createCoachApiHandler(env));
       server.middlewares.use('/api/demo-config', createDemoConfigHandler(env));
       server.middlewares.use('/api/static-map', createStaticMapHandler(env));
     },
     configurePreviewServer(server) {
+      server.middlewares.use('/api/running-coach-chat', createCoachChatApiHandler(env));
       server.middlewares.use('/api/coach', createCoachApiHandler(env));
       server.middlewares.use('/api/demo-config', createDemoConfigHandler(env));
       server.middlewares.use('/api/static-map', createStaticMapHandler(env));

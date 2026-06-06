@@ -21,9 +21,9 @@ describe('progress service', () => {
 
   it('calculates total distance and route progress', () => {
     const records: RunRecord[] = [
-      { date: '2026-05-16', distanceKm: 4.6, source: 'manual-demo' },
-      { date: '2026-05-17', distanceKm: 6.8, source: 'manual-demo' },
-      { date: '2026-05-18', distanceKm: 7.2, source: 'manual-demo' },
+      { id: 'r1', date: '2026-05-16', distanceKm: 4.6, source: 'manual-demo' },
+      { id: 'r2', date: '2026-05-17', distanceKm: 6.8, source: 'manual-demo' },
+      { id: 'r3', date: '2026-05-18', distanceKm: 7.2, source: 'manual-demo' },
     ];
 
     const total = getTotalDistance(records);
@@ -44,10 +44,10 @@ describe('progress service', () => {
 
   it('counts consecutive training days from the latest record', () => {
     const records: RunRecord[] = [
-      { date: '2026-05-15', distanceKm: 4, source: 'manual-demo' },
-      { date: '2026-05-17', distanceKm: 5, source: 'manual-demo' },
-      { date: '2026-05-18', distanceKm: 5, source: 'manual-demo' },
-      { date: '2026-05-19', distanceKm: 5, source: 'manual-demo' },
+      { id: 'r1', date: '2026-05-15', distanceKm: 4, source: 'manual-demo' },
+      { id: 'r2', date: '2026-05-17', distanceKm: 5, source: 'manual-demo' },
+      { id: 'r3', date: '2026-05-18', distanceKm: 5, source: 'manual-demo' },
+      { id: 'r4', date: '2026-05-19', distanceKm: 5, source: 'manual-demo' },
     ];
 
     expect(getContinuousDays(records)).toBe(3);

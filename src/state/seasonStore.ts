@@ -19,6 +19,32 @@ const storageKey = 'hla-running-world-demo:v1';
 
 let store: ReturnType<typeof createSeasonStore> | null = null;
 
+function createRecordId(date: string, distanceKm: number, prefix = 'run'): string {
+  return `${prefix}-${date}-${distanceKm.toFixed(1)}-${Date.now().toString(36)}`;
+}
+
+function normalizeRecords(records: unknown): RunRecord[] {
+  if (!Array.isArray(records)) {
+    return createSeedRecords();
+  }
+
+  return records
+    .map((record, index): RunRecord | null => {
+      const item = record as Partial<RunRecord>;
+      if (!item.date || !Number.isFinite(item.distanceKm)) {
+        return null;
+      }
+
+      return {
+        id: item.id || `stored-${item.date}-${Number(item.distanceKm).toFixed(1)}-${index}`,
+        date: item.date,
+        distanceKm: Number(item.distanceKm),
+        source: 'manual-demo',
+      };
+    })
+    .filter((record): record is RunRecord => Boolean(record));
+}
+
 function createDefaultState(): DemoState {
   return {
     selectedRouteId: 'jiangyin-city',
@@ -51,7 +77,7 @@ function loadState(): DemoState {
     }
     return {
       selectedRouteId: parsed.selectedRouteId,
-      records: Array.isArray(parsed.records) ? parsed.records : createSeedRecords(),
+      records: normalizeRecords(parsed.records),
       lastCoachText: parsed.lastCoachText || createDefaultState().lastCoachText,
       lastUnlockedNodeIds: Array.isArray(parsed.lastUnlockedNodeIds)
         ? parsed.lastUnlockedNodeIds
@@ -115,6 +141,7 @@ function createSeasonStore() {
     getDistanceToNextNode(activeRoute.value, totalDistance.value),
   );
   const streakDays = computed(() => getContinuousDays(state.records));
+  const allRecords = computed(() => [...state.records].reverse());
   const recentRecords = computed(() => [...state.records].slice(-5).reverse());
 
   function persist() {
@@ -184,6 +211,7 @@ function createSeasonStore() {
     const beforeDistance = totalDistance.value;
     const route = activeRoute.value;
     const record: RunRecord = {
+      id: createRecordId(toDateKey(new Date()), todayDistance),
       date: toDateKey(new Date()),
       distanceKm: todayDistance,
       source: 'manual-demo',
@@ -244,26 +272,50 @@ function createSeasonStore() {
     Object.assign(state, createDefaultState());
   }
 
+  function undoRunRecord(recordId: string) {
+    const index = state.records.findIndex((record) => record.id === recordId);
+    if (index < 0) {
+      return false;
+    }
+
+    const [removed] = state.records.splice(index, 1);
+    state.lastUnlockedNodeIds = [];
+    state.lastRunDistanceKm = 0;
+    state.lastRunBeforeKm = 0;
+    state.lastRunAfterKm = getTotalDistance(state.records);
+    state.coachStatus = 'local';
+    state.coachProvider = 'local';
+    state.coachModel = 'rule-fallback';
+    state.coachError = undefined;
+    state.lastCoachText = `${removed.date} 的 ${removed.distanceKm.toFixed(1)} km 已撤销。现在累计 ${state.lastRunAfterKm.toFixed(1)} km，可以重新提交正确跑量。`;
+    state.shareCardVersion += 1;
+    return true;
+  }
+
   function resetRoadshowPreset() {
     Object.assign(state, {
       ...createDefaultState(),
       records: [
         {
+          id: `roadshow-${toDateKey(new Date(Date.now() - 4 * 24 * 60 * 60 * 1000))}`,
           date: toDateKey(new Date(Date.now() - 4 * 24 * 60 * 60 * 1000)),
           distanceKm: 4.8,
           source: 'manual-demo',
         },
         {
+          id: `roadshow-${toDateKey(new Date(Date.now() - 3 * 24 * 60 * 60 * 1000))}`,
           date: toDateKey(new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)),
           distanceKm: 6.4,
           source: 'manual-demo',
         },
         {
+          id: `roadshow-${toDateKey(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000))}`,
           date: toDateKey(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)),
           distanceKm: 7.6,
           source: 'manual-demo',
         },
         {
+          id: `roadshow-${toDateKey(new Date(Date.now() - 1 * 24 * 60 * 60 * 1000))}`,
           date: toDateKey(new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)),
           distanceKm: 8.1,
           source: 'manual-demo',
@@ -290,9 +342,11 @@ function createSeasonStore() {
     currentNode,
     distanceToNextNode,
     streakDays,
+    allRecords,
     recentRecords,
     addRun,
     addRunWithCoach,
+    undoRunRecord,
     resetDemo,
     resetRoadshowPreset,
     selectRoute,

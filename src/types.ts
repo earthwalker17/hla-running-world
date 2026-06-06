@@ -40,6 +40,13 @@ export interface RouteNode {
   brandHint: string;
 }
 
+export interface RouteNodeStory {
+  image: string;
+  teaser: string;
+  detail: string;
+  imageSource: string;
+}
+
 export interface RouteReward {
   id: string;
   title: string;
@@ -94,9 +101,33 @@ export interface SeasonProfile {
 }
 
 export interface RunRecord {
+  id: string;
   date: string;
   distanceKm: number;
   source: 'manual-demo';
+}
+
+export interface CoachChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface CoachChatPayload {
+  question: string;
+  routeTitle: string;
+  totalDistance: number;
+  streakDays: number;
+  currentNode: string;
+  nextNode?: string;
+  recentMessages: CoachChatMessage[];
+}
+
+export interface CoachChatResult {
+  text: string;
+  source: 'remote' | 'local';
+  provider: 'zhipu' | 'deepseek' | 'qwen' | 'local';
+  model: string;
+  error?: string;
 }
 
 export interface DemoState {

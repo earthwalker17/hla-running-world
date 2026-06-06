@@ -21,6 +21,19 @@ interface CoachRequestPayload {
   fallbackText?: string;
 }
 
+interface CoachChatRequestPayload {
+  question?: string;
+  routeTitle?: string;
+  totalDistance?: number;
+  streakDays?: number;
+  currentNode?: string;
+  nextNode?: string;
+  recentMessages?: Array<{
+    role?: 'user' | 'assistant';
+    content?: string;
+  }>;
+}
+
 interface ProviderConfig {
   provider: ProviderId;
   model: string;
@@ -168,6 +181,65 @@ function buildMessages(payload: CoachRequestPayload) {
   ];
 }
 
+function buildLocalChatText(payload: CoachChatRequestPayload): string {
+  const question = (payload.question || '').toLowerCase();
+  const totalDistance = Number(payload.totalDistance ?? 0);
+  const nextNodeText = payload.nextNode ? `下一站是「${payload.nextNode}」。` : '你已经接近路线收尾。';
+
+  if (question.includes('痛') || question.includes('伤') || question.includes('膝') || question.includes('累')) {
+    return '先把强度降下来，今天可以改成轻松跑或休息。疼痛持续的话，别硬顶，优先找专业人士看看。';
+  }
+
+  if (question.includes('配速') || question.includes('节奏') || question.includes('训练')) {
+    return `你现在累计 ${totalDistance.toFixed(1)} km，先稳住舒适配速。${nextNodeText} 连续性更重要。`;
+  }
+
+  if (question.includes('节点') || question.includes('路线') || question.includes('赛季')) {
+    return `你在「${payload.currentNode || '当前节点'}」附近推进。${nextNodeText} 跑完回来，我继续帮你点亮进度。`;
+  }
+
+  if (question.includes('权益') || question.includes('奖') || question.includes('券') || question.includes('品牌')) {
+    return '权益先按 Demo 示意：徽章、装备券、抽奖和线下名额。真正上线时可以和 HLA POW 澜跑活动池打通。';
+  }
+
+  return '收到。我会按陪跑者的方式陪你聊训练、赛季和品牌活动。先把今天这一步跑稳，故事自然会往前走。';
+}
+
+function buildChatMessages(payload: CoachChatRequestPayload) {
+  const recentMessages = Array.isArray(payload.recentMessages)
+    ? payload.recentMessages
+        .filter((message) => message.role && message.content)
+        .slice(-4)
+        .map((message) => ({
+          role: message.role,
+          content: String(message.content).slice(0, 180),
+        }))
+    : [];
+
+  return [
+    {
+      role: 'system',
+      content:
+        '你是 HLA Running World 的中文 AI 陪跑者。请用 1 到 2 句中文回答，温暖、简短、像真实品牌陪跑者。只回答训练、赛季、跑团、海澜之家/HLA POW 澜跑品牌活动相关内容。不要长篇科普，不要使用表情符号，不要提 API 或模型。',
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        routeTitle: payload.routeTitle,
+        totalDistance: payload.totalDistance,
+        streakDays: payload.streakDays,
+        currentNode: payload.currentNode,
+        nextNode: payload.nextNode,
+      }),
+    },
+    ...recentMessages,
+    {
+      role: 'user',
+      content: String(payload.question || '').slice(0, 260),
+    },
+  ];
+}
+
 function extractText(data: unknown): string {
   const response = data as {
     choices?: Array<{
@@ -177,6 +249,47 @@ function extractText(data: unknown): string {
     }>;
   };
   return response.choices?.[0]?.message?.content?.trim() ?? '';
+}
+
+async function requestRemoteCoachChat(payload: CoachChatRequestPayload, config: ProviderConfig): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: buildChatMessages(payload),
+        temperature: 0.55,
+        max_tokens: 90,
+        thinking: {
+          type: 'disabled',
+        },
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`AI provider returned ${response.status}${errorText ? `: ${errorText.slice(0, 160)}` : ''}`);
+    }
+
+    const data = await response.json();
+    const text = extractText(data);
+    if (!text) {
+      throw new Error('AI provider returned empty content');
+    }
+
+    return text.slice(0, 180);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function formatProviderError(error: unknown): string {
@@ -331,6 +444,52 @@ export function createCoachApiHandler(env: Env): Middleware {
           model: config.model,
           tone: 'warm-roadshow',
           shareReady: true,
+        });
+      } catch (error) {
+        sendJson(response, 200, {
+          text: fallbackText,
+          source: 'local',
+          provider: 'local',
+          model: 'rule-fallback',
+          error: formatProviderError(error),
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+export function createCoachChatApiHandler(env: Env): Middleware {
+  return async (request, response, next) => {
+    if (request.method !== 'POST') {
+      sendJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const payload = (await readJsonBody(request)) as CoachChatRequestPayload;
+      const fallbackText = buildLocalChatText(payload);
+      const config = getProviderConfig(env);
+
+      if (!config) {
+        sendJson(response, 200, {
+          text: fallbackText,
+          source: 'local',
+          provider: 'local',
+          model: 'rule-fallback',
+          error: 'missing-api-key-or-local-provider',
+        });
+        return;
+      }
+
+      try {
+        const text = await requestRemoteCoachChat(payload, config);
+        sendJson(response, 200, {
+          text,
+          source: 'remote',
+          provider: config.provider,
+          model: config.model,
         });
       } catch (error) {
         sendJson(response, 200, {

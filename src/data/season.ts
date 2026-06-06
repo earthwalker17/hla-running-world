@@ -291,8 +291,8 @@ export const teamRanks: TeamRank[] = [
 
 export function createSeedRecords(now = new Date()): RunRecord[] {
   return [
-    { date: shiftDateKey(now, -3), distanceKm: 4.6, source: 'manual-demo' },
-    { date: shiftDateKey(now, -2), distanceKm: 6.8, source: 'manual-demo' },
-    { date: shiftDateKey(now, -1), distanceKm: 7.2, source: 'manual-demo' },
+    { id: `seed-${shiftDateKey(now, -3)}`, date: shiftDateKey(now, -3), distanceKm: 4.6, source: 'manual-demo' },
+    { id: `seed-${shiftDateKey(now, -2)}`, date: shiftDateKey(now, -2), distanceKm: 6.8, source: 'manual-demo' },
+    { id: `seed-${shiftDateKey(now, -1)}`, date: shiftDateKey(now, -1), distanceKm: 7.2, source: 'manual-demo' },
   ];
 }
