@@ -1,4 +1,5 @@
 import type { CoachChatPayload, CoachChatResult } from '../types';
+import { shouldUseRemoteRoadshowApi } from './deploymentMode';
 
 function buildLocalCoachChatReply(payload: CoachChatPayload): string {
   const question = payload.question.toLowerCase();
@@ -26,7 +27,7 @@ function buildLocalCoachChatReply(payload: CoachChatPayload): string {
 export async function requestCoachChatReply(payload: CoachChatPayload): Promise<CoachChatResult> {
   const fallbackText = buildLocalCoachChatReply(payload);
 
-  if (!payload.question.trim()) {
+  if (!payload.question.trim() || !shouldUseRemoteRoadshowApi()) {
     return {
       text: fallbackText,
       source: 'local',

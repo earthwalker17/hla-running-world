@@ -1,3 +1,5 @@
+import { shouldUseRemoteRoadshowApi } from './deploymentMode';
+
 export interface RoadshowRuntimeConfig {
   amapKey: string;
   amapSecurityCode: string;
@@ -13,6 +15,13 @@ function getBuildTimeConfig(): RoadshowRuntimeConfig {
 }
 
 export async function loadRoadshowConfig(): Promise<RoadshowRuntimeConfig> {
+  if (!shouldUseRemoteRoadshowApi()) {
+    return {
+      amapKey: '',
+      amapSecurityCode: '',
+    };
+  }
+
   cachedConfig ??= fetch('/api/demo-config', {
     headers: { Accept: 'application/json' },
   })

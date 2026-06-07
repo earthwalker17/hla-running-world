@@ -114,7 +114,6 @@ import MetricTile from '../components/MetricTile.vue';
 import {
   communityParticipants,
   communityTeams,
-  currentRunner,
   getCommunityRunnerStats,
   topCommunityTeams,
 } from '../data/community';
@@ -129,11 +128,15 @@ const distanceToNextNode = store.distanceToNextNode;
 const streakDays = store.streakDays;
 
 const profileRunner = computed(() => ({
-  ...currentRunner,
+  id: store.visitorProfile.visitorId,
+  displayName: store.visitorProfile.displayName,
+  city: store.visitorProfile.city,
+  teamId: store.visitorProfile.teamId,
   totalDistanceKm: totalDistance.value,
   streakDays: streakDays.value,
   submissions: store.state.records.length,
-  shareCards: currentRunner.shareCards + Math.max(0, store.state.shareCardVersion),
+  shareCards: Math.max(0, store.state.shareCardVersion),
+  lastSubmitDaysAgo: 0,
   couponTriggered: totalDistance.value >= 24.4,
 }));
 

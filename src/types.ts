@@ -107,6 +107,14 @@ export interface RunRecord {
   source: 'manual-demo';
 }
 
+export interface VisitorProfile {
+  visitorId: string;
+  displayName: string;
+  city: string;
+  teamId: string;
+  createdAt: string;
+}
+
 export interface CoachChatMessage {
   role: 'user' | 'assistant';
   content: string;

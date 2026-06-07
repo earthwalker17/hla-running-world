@@ -1,6 +1,13 @@
 import { computed, reactive, watch } from 'vue';
 import { createSeedRecords, routes as seedRoutes } from '../data/season';
-import type { CoachContext, DemoState, RouteMeasurement, RunRecord, SeasonRoute } from '../types';
+import type {
+  CoachContext,
+  DemoState,
+  RouteMeasurement,
+  RunRecord,
+  SeasonRoute,
+  VisitorProfile,
+} from '../types';
 import { toDateKey } from '../utils/dates';
 import { buildCoachFeedback } from '../services/aiCoach';
 import { requestCoachFeedback } from '../services/coachClient';
@@ -15,9 +22,124 @@ import {
   getUnlockedNodes,
 } from '../services/progress';
 
-const storageKey = 'hla-running-world-demo:v1';
+const legacyStorageKey = 'hla-running-world-demo:v1';
+const visitorStorageKey = 'hla-running-world-demo:visitor:v1';
+const stateStoragePrefix = 'hla-running-world-demo:state';
+const stateStorageVersion = 'v2';
+
+const visitorSeeds = [
+  { city: '江阴', teamId: 'team-01' },
+  { city: '无锡', teamId: 'team-03' },
+  { city: '南京', teamId: 'team-08' },
+  { city: '苏州', teamId: 'team-09' },
+  { city: '常州', teamId: 'team-10' },
+  { city: '镇江', teamId: 'team-11' },
+  { city: '徐州', teamId: 'team-12' },
+  { city: '连云港', teamId: 'team-13' },
+];
 
 let store: ReturnType<typeof createSeasonStore> | null = null;
+
+function readStorage(key: string): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createStateStorageKey(visitorId: string): string {
+  return `${stateStoragePrefix}:${visitorId}:${stateStorageVersion}`;
+}
+
+function hashText(value: string): number {
+  return Array.from(value).reduce((hash, char) => {
+    return (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }, 7);
+}
+
+function createVisitorId(): string {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return `visitor-${window.crypto.randomUUID()}`;
+  }
+
+  return `visitor-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getVisitorSuffix(visitorId: string): string {
+  return visitorId.replace(/[^a-z0-9]/gi, '').slice(-4).toUpperCase() || 'HLA0';
+}
+
+function createVisitorProfile(): VisitorProfile {
+  const visitorId = createVisitorId();
+  const seed = visitorSeeds[hashText(visitorId) % visitorSeeds.length] ?? {
+    city: '江阴',
+    teamId: 'team-01',
+  };
+  const suffix = getVisitorSuffix(visitorId);
+
+  return {
+    visitorId,
+    displayName: `${seed.city}跑友 ${suffix}`,
+    city: seed.city,
+    teamId: seed.teamId,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeVisitorProfile(raw: unknown): VisitorProfile | null {
+  const profile = raw as Partial<VisitorProfile>;
+  if (
+    !profile ||
+    !profile.visitorId ||
+    !profile.displayName ||
+    !profile.city ||
+    !profile.teamId
+  ) {
+    return null;
+  }
+
+  return {
+    visitorId: profile.visitorId,
+    displayName: profile.displayName,
+    city: profile.city,
+    teamId: profile.teamId,
+    createdAt: profile.createdAt || new Date().toISOString(),
+  };
+}
+
+function loadVisitorProfile(): VisitorProfile {
+  try {
+    const raw = readStorage(visitorStorageKey);
+    const parsed = raw ? normalizeVisitorProfile(JSON.parse(raw)) : null;
+    if (parsed) {
+      return parsed;
+    }
+  } catch {
+    // A malformed profile should not block the demo.
+  }
+
+  const profile = createVisitorProfile();
+  writeStorage(visitorStorageKey, JSON.stringify(profile));
+  return profile;
+}
 
 function createRecordId(date: string, distanceKm: number, prefix = 'run'): string {
   return `${prefix}-${date}-${distanceKm.toFixed(1)}-${Date.now().toString(36)}`;
@@ -61,48 +183,82 @@ function createDefaultState(): DemoState {
   };
 }
 
-function loadState(): DemoState {
-  if (typeof window === 'undefined') {
-    return createDefaultState();
+function normalizeState(raw: unknown): DemoState | null {
+  const parsed = raw as Partial<DemoState>;
+  const selectedRouteId = parsed?.selectedRouteId;
+
+  if (
+    typeof selectedRouteId !== 'string' ||
+    !seedRoutes.some((route) => route.id === selectedRouteId)
+  ) {
+    return null;
   }
 
+  const defaultState = createDefaultState();
+
+  return {
+    selectedRouteId,
+    records: normalizeRecords(parsed.records),
+    lastCoachText: parsed.lastCoachText || defaultState.lastCoachText,
+    lastUnlockedNodeIds: Array.isArray(parsed.lastUnlockedNodeIds)
+      ? parsed.lastUnlockedNodeIds
+      : [],
+    coachStatus:
+      parsed.coachStatus === 'remote' ||
+      parsed.coachStatus === 'pending' ||
+      parsed.coachStatus === 'error'
+        ? parsed.coachStatus
+        : 'local',
+    coachProvider: parsed.coachProvider || 'local',
+    coachModel: parsed.coachModel || 'rule-fallback',
+    coachError: parsed.coachError,
+    lastRunDistanceKm:
+      typeof parsed.lastRunDistanceKm === 'number' && Number.isFinite(parsed.lastRunDistanceKm)
+        ? parsed.lastRunDistanceKm
+        : 0,
+    lastRunBeforeKm:
+      typeof parsed.lastRunBeforeKm === 'number' && Number.isFinite(parsed.lastRunBeforeKm)
+        ? parsed.lastRunBeforeKm
+        : 0,
+    lastRunAfterKm:
+      typeof parsed.lastRunAfterKm === 'number' && Number.isFinite(parsed.lastRunAfterKm)
+        ? parsed.lastRunAfterKm
+        : 0,
+    shareCardVersion:
+      typeof parsed.shareCardVersion === 'number' && Number.isFinite(parsed.shareCardVersion)
+        ? parsed.shareCardVersion
+        : 0,
+  };
+}
+
+function readStateFromKey(storageKey: string): DemoState | null {
   try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) {
-      return createDefaultState();
-    }
-    const parsed = JSON.parse(raw) as DemoState;
-    if (!seedRoutes.some((route) => route.id === parsed.selectedRouteId)) {
-      return createDefaultState();
-    }
-    return {
-      selectedRouteId: parsed.selectedRouteId,
-      records: normalizeRecords(parsed.records),
-      lastCoachText: parsed.lastCoachText || createDefaultState().lastCoachText,
-      lastUnlockedNodeIds: Array.isArray(parsed.lastUnlockedNodeIds)
-        ? parsed.lastUnlockedNodeIds
-        : [],
-      coachStatus:
-        parsed.coachStatus === 'remote' ||
-        parsed.coachStatus === 'pending' ||
-        parsed.coachStatus === 'error'
-          ? parsed.coachStatus
-          : 'local',
-      coachProvider: parsed.coachProvider || 'local',
-      coachModel: parsed.coachModel || 'rule-fallback',
-      coachError: parsed.coachError,
-      lastRunDistanceKm: Number.isFinite(parsed.lastRunDistanceKm) ? parsed.lastRunDistanceKm : 0,
-      lastRunBeforeKm: Number.isFinite(parsed.lastRunBeforeKm) ? parsed.lastRunBeforeKm : 0,
-      lastRunAfterKm: Number.isFinite(parsed.lastRunAfterKm) ? parsed.lastRunAfterKm : 0,
-      shareCardVersion: Number.isFinite(parsed.shareCardVersion) ? parsed.shareCardVersion : 0,
-    };
+    const raw = readStorage(storageKey);
+    return raw ? normalizeState(JSON.parse(raw)) : null;
   } catch {
-    return createDefaultState();
+    return null;
   }
 }
 
+function loadState(visitorId: string): DemoState {
+  const currentStateKey = createStateStorageKey(visitorId);
+  const scopedState = readStateFromKey(currentStateKey);
+  if (scopedState) {
+    return scopedState;
+  }
+
+  const migratedLegacyState = readStateFromKey(legacyStorageKey);
+  if (migratedLegacyState) {
+    writeStorage(currentStateKey, JSON.stringify(migratedLegacyState));
+    return migratedLegacyState;
+  }
+
+  return createDefaultState();
+}
+
 function createSeasonStore() {
-  const state = reactive<DemoState>(loadState());
+  const visitorProfile = reactive<VisitorProfile>(loadVisitorProfile());
+  const state = reactive<DemoState>(loadState(visitorProfile.visitorId));
   const routeMeasurements = reactive<Record<string, RouteMeasurement>>({});
 
   function applyRouteMeasurement(route: SeasonRoute): SeasonRoute {
@@ -145,9 +301,7 @@ function createSeasonStore() {
   const recentRecords = computed(() => [...state.records].slice(-5).reverse());
 
   function persist() {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(storageKey, JSON.stringify(state));
-    }
+    writeStorage(createStateStorageKey(visitorProfile.visitorId), JSON.stringify(state));
   }
 
   function selectRoute(routeId: string) {
@@ -333,6 +487,7 @@ function createSeasonStore() {
   watch(state, persist, { deep: true });
 
   return {
+    visitorProfile,
     state,
     routes,
     activeRoute,

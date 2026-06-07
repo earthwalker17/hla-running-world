@@ -1,5 +1,6 @@
 import type { CoachApiPayload, CoachApiResult, CoachContext } from '../types';
 import { getDistanceToNextNode } from './progress';
+import { shouldUseRemoteRoadshowApi } from './deploymentMode';
 
 function toPayload(context: CoachContext, fallbackText: string): CoachApiPayload {
   const currentNode = context.unlockedNodes[context.unlockedNodes.length - 1] ?? context.route.nodes[0];
@@ -21,6 +22,15 @@ export async function requestCoachFeedback(
   context: CoachContext,
   fallbackText: string,
 ): Promise<CoachApiResult> {
+  if (!shouldUseRemoteRoadshowApi()) {
+    return {
+      text: fallbackText,
+      source: 'local',
+      provider: 'local',
+      model: 'rule-fallback',
+    };
+  }
+
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 20000);
 

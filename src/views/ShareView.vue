@@ -48,12 +48,12 @@ import { Download, PenLine, RefreshCw } from 'lucide-vue-next';
 import {
   communityParticipants,
   communityTeams,
-  currentRunner,
   getCommunityRunnerStats,
 } from '../data/community';
 import { seasonProfile } from '../data/season';
 import { useSeasonStore } from '../state/seasonStore';
 import { loadAmap } from '../services/amapLoader';
+import { shouldUseRemoteRoadshowApi } from '../services/deploymentMode';
 import { localMapProvider } from '../services/mapProvider';
 import { planRoadRoute } from '../services/roadRoutePlanner';
 
@@ -86,11 +86,15 @@ const route = computed(() => store.activeRoute.value);
 const currentNode = store.currentNode;
 const totalDistance = store.totalDistance;
 const profileRunner = computed(() => ({
-  ...currentRunner,
+  id: store.visitorProfile.visitorId,
+  displayName: store.visitorProfile.displayName,
+  city: store.visitorProfile.city,
+  teamId: store.visitorProfile.teamId,
   totalDistanceKm: totalDistance.value,
   streakDays: store.streakDays.value,
   submissions: store.state.records.length,
-  shareCards: currentRunner.shareCards + Math.max(0, store.state.shareCardVersion),
+  shareCards: Math.max(0, store.state.shareCardVersion),
+  lastSubmitDaysAgo: 0,
   couponTriggered: totalDistance.value >= 24.4,
 }));
 const runnerStats = computed(() =>
@@ -422,6 +426,12 @@ function drawRouteOverlay(ctx: CanvasRenderingContext2D, box: MapBox, view: Stat
 async function drawRealMap(ctx: CanvasRenderingContext2D) {
   const box = { x: 64, y: 318, width: 772, height: 396 };
   const view = getShareMapView(box);
+
+  if (!shouldUseRemoteRoadshowApi()) {
+    drawGeoRouteFallback(ctx, box, view);
+    return;
+  }
+
   const path = encodeURIComponent(getStaticMapPathParam(route.value.map.path));
   const center = `${view.center.lng.toFixed(6)},${view.center.lat.toFixed(6)}`;
   const url = `/api/static-map?routeId=${route.value.id}&center=${center}&zoom=${view.zoom}&path=${path}&v=${store.state.shareCardVersion}`;
